@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include <deque>
+#include <queue>
 
 // Условный заголовок для Protobuf сообщений
 // #include "game_messages.pb.h"
@@ -25,17 +26,25 @@ public:
     {
         // В реальном проекте здесь была бы асинхронная запись с очередью
         std::cout << "[Server] Sending to " << name_ << ": " << message << std::endl;
-        boost::asio::async_write(socket_, boost::asio::buffer(message + "\n"), [](const boost::system::error_code& error, size_t) {
+        boost::asio::async_write(socket_, boost::asio::buffer(message + "\n"), [](const boost::system::error_code &error, size_t)
+                                 {
                 if (error) {
                     std::cerr << "Send error: " << error.message() << std::endl;
-                }
-            });
+                } });
         // ... код для записи в сокет ...
     }
 
 private:
     tcp::socket socket_;
     std::string name_ = "Anon";
+};
+
+class Command
+{
+private:
+public:
+    std::string command;
+    std::shared_ptr<GameClient> client;
 };
 
 // Класс MMO Сервера
@@ -53,6 +62,8 @@ public:
     }
 
 private:
+    std::queue<Command> taskQueue;
+
     void start_accept()
     {
         auto new_client = std::make_shared<GameClient>(tcp::socket(io_context_));
@@ -91,8 +102,8 @@ private:
                                               std::getline(is, message);
 
                                               // Обрабатываем команду
-                                              process_command(client, message);
-
+                                              // process_command(client, message);
+                                              taskQueue.push({message, client});
                                               // Продолжаем читать
                                               start_read(client);
                                           }
@@ -107,6 +118,7 @@ private:
                                               }
                                           }
                                       });
+
         // В реальном проекте здесь буфер и асинхронное чтение с обработкой заголовков
         // ...
     }
@@ -148,9 +160,14 @@ private:
                                                           std::chrono::system_clock::now().time_since_epoch())
                                                           .count()));*/
         std::cout << "[Tick] World updated. Clients: " << clients_.size() << std::endl;
-
+        if (!taskQueue.empty())
+        {
+            auto command = taskQueue.front();
+            process_command(command.client, command.command);
+            taskQueue.pop();
+        }
         // Планируем следующий тик через 100 мс
-        auto timer = std::make_shared<boost::asio::steady_timer>(io_context_, std::chrono::milliseconds(100));
+        auto timer = std::make_shared<boost::asio::steady_timer>(io_context_, std::chrono::milliseconds(1000));
         timer->async_wait([this, timer](const boost::system::error_code &)
                           { game_loop(); });
     }
